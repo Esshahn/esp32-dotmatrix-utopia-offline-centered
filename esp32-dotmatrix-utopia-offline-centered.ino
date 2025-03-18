@@ -16,29 +16,6 @@
 
 #include "ESP32-HUB75-MatrixPanel-I2S-DMA.h"
 
-// Configuration constants
-constexpr uint8_t DISPLAY_WIDTH = 64;
-constexpr uint8_t DISPLAY_HEIGHT = 64;
-constexpr uint8_t BRIGHTNESS = 80;  // 0-255
-constexpr unsigned long REFRESH_INTERVAL = 1000UL * 60 * 60 * 4;  //60 minutes * 4 = 4 hours
-
-// Time configuration
-constexpr uint8_t WAKE_HOUR = 7;    // 7 AM
-constexpr uint8_t SLEEP_HOUR = 22;  // 10 PM
-constexpr uint8_t SETUP_BUTTON = 0; // Boot button on most ESP32 boards
-
-// Store time in RTC memory to persist during deep sleep
-RTC_DATA_ATTR uint8_t currentHour = WAKE_HOUR;  // Default to wake hour
-RTC_DATA_ATTR bool timeInitialized = false;
-
-// Forward declarations of classes
-class DisplayManager;
-class ContentManager;
-
-// Global variables
-DisplayManager* display;
-ContentManager* content;
-
 // Messages array
 const char* const utopias[] = {
     "Ewiger Sommer, niemals zu heiss",
@@ -327,6 +304,29 @@ const char* const utopias[] = {
     "Katzen, die Geheimnisse der Welt kennen"
 };
 
+// Configuration constants
+constexpr uint8_t DISPLAY_WIDTH = 64;
+constexpr uint8_t DISPLAY_HEIGHT = 64;
+constexpr uint8_t BRIGHTNESS = 80;  // 0-255
+constexpr unsigned long REFRESH_INTERVAL = 1000UL * 60 * 60 * 4;  //60 minutes * 4 = 4 hours
+const uint8_t SLEEP_BUTTON = 0;  // GPIO0 - BOOT button
+const unsigned long DEBOUNCE_DELAY = 50;  // milliseconds
+
+// Time configuration
+const uint16_t sleep_time_in_minutes = 9 * 60;    // Sleep for 9 hours (in minutes)
+const uint16_t awake_time_in_minutes = 15 * 60;   // Stay awake for 15 hours (in minutes)
+
+// RTC variable that persists during deep sleep
+RTC_DATA_ATTR uint16_t elapsed_minutes = 0;  // Minutes since last wake
+
+// Forward declarations of classes
+class DisplayManager;
+class ContentManager;
+
+// Global variables
+DisplayManager* display;
+ContentManager* content;
+
 // Classes definitions
 class ContentManager {
 private:
@@ -343,7 +343,7 @@ public:
 class DisplayManager {
 private:
     MatrixPanel_I2S_DMA* display;
-    unsigned long lastUpdateTime = 0;
+    // lastUpdateTime removed as it's no longer needed
 
 public:
     DisplayManager() {
@@ -375,13 +375,7 @@ public:
         display->setTextColor(display->color444(r, g, b));
     }
 
-    bool shouldUpdate() {
-        return (millis() - lastUpdateTime) >= REFRESH_INTERVAL;
-    }
-
-    void markUpdated() {
-        lastUpdateTime = millis();
-    }
+    // shouldUpdate() and markUpdated() removed as they're no longer needed
 
     void updateDisplay(const String& message) {
         clearScreen();
@@ -460,112 +454,70 @@ public:
     }
 };
 
-// Function declarations
-void setupTime();
-void goToSleep();
-
 // Function implementations
-void setupTime() {
-    Serial.println("Starting time setup");
-    
-    const unsigned long DEBOUNCE_DELAY = 200;    // milliseconds
-    const unsigned long LONG_PRESS = 2000;       // 2 seconds for confirmation
-    
-    while(true) {  // Loop until long press
-        // Show current hour
-        display->clearScreen();
-        display->setCursor(3, 3);
-        display->printf("Hour: %d", currentHour);
-        
-        if (digitalRead(SETUP_BUTTON) == LOW) {
-            unsigned long pressStart = millis();
-            
-            // Wait for button release or long press
-            while(digitalRead(SETUP_BUTTON) == LOW) {
-                if ((millis() - pressStart) > LONG_PRESS) {
-                    timeInitialized = true;
-                    display->clearScreen();
-                    display->setCursor(3, 3);
-                    display->print("Time Set!");
-                    delay(2000);
-                    return;
-                }
-                delay(10);
-            }
-            
-            // Short press - increment hour
-            if ((millis() - pressStart) < LONG_PRESS) {
-                currentHour = (currentHour + 1) % 24;
-                delay(DEBOUNCE_DELAY);
-            }
-        }
-        delay(50);
-    }
-}
-
 void goToSleep() {
-    Serial.printf("Sleep time reached (Hour: %d). Going to sleep until %d:00\n", 
-                 currentHour, WAKE_HOUR);
+    Serial.printf("Sleep time reached (Elapsed minutes: %d). Going to sleep for %d minutes\n", 
+                 elapsed_minutes, sleep_time_in_minutes);
     
     display->clearScreen();
     display->setBrightness8(0);
     
-    // Calculate sleep duration until wake hour
-    int hoursToSleep = (WAKE_HOUR - currentHour + 24) % 24;
-    uint64_t sleepSeconds = hoursToSleep * 3600ULL;
+    // Reset elapsed_minutes counter
+    elapsed_minutes = 0;
     
-    Serial.printf("Sleeping for %d hours\n", hoursToSleep);
-    delay(100);  // Allow serial to finish
+    // Calculate sleep duration in microseconds
+    const uint64_t SECONDS_PER_MINUTE = 60ULL;
+    uint64_t sleepMicros = sleep_time_in_minutes * SECONDS_PER_MINUTE * 1000000ULL;
     
-    esp_sleep_enable_timer_wakeup(sleepSeconds * 1000000ULL);
+    // Enable wake-up sources
+    esp_sleep_enable_timer_wakeup(sleepMicros);
+    
+    Serial.println("Going to sleep now");
+    Serial.flush();
+    delay(100);
+    
     esp_deep_sleep_start();
 }
 
 void setup() {
     Serial.begin(115200);
-    pinMode(SETUP_BUTTON, INPUT_PULLUP);
+    Serial.println("\nFramed Utopia Starting Up");
+    Serial.printf("Will stay awake for %d minutes\n", awake_time_in_minutes);
     
+    // Setup sleep button as input with internal pull-up
+    pinMode(SLEEP_BUTTON, INPUT_PULLUP);
+        
     display = new DisplayManager();
     content = new ContentManager();
-    
-    if (!timeInitialized) {
-        setupTime();
-    }
-    
-    // Check if we should immediately sleep
-    if (currentHour >= SLEEP_HOUR || currentHour < WAKE_HOUR) {
-        goToSleep();
-    }
-    
-    // Initial display update
+        
+    // Display new message on wake
     display->updateDisplay(content->getRandomMessage());
-    display->markUpdated();
 }
 
 void loop() {
     static unsigned long lastMinute = 0;
-    static uint8_t minuteCounter = 0;
+    static unsigned long lastButtonCheck = 0;
     unsigned long now = millis();
     
-    // Update time every minute
-    if ((now - lastMinute) >= 60000) {
-        lastMinute = now;
-        
-        if (++minuteCounter >= 60) {  // Full hour passed
-            minuteCounter = 0;
-            currentHour = (currentHour + 1) % 24;
-            
-            Serial.printf("Hour changed: %d:00\n", currentHour);
-            
-            if (currentHour == SLEEP_HOUR) {
-                goToSleep();
-            }
+    // Check button state with debounce
+    if ((now - lastButtonCheck) >= DEBOUNCE_DELAY) {
+        lastButtonCheck = now;
+        if (digitalRead(SLEEP_BUTTON) == LOW) {  // Button is pressed (active low)
+            Serial.println("Sleep button pressed, going to sleep");
+            goToSleep();  // Go to sleep immediately
         }
     }
     
-    // Update display content when needed
-    if (display->shouldUpdate()) {
-        display->updateDisplay(content->getRandomMessage());
-        display->markUpdated();
+    // Regular time checking
+    if ((now - lastMinute) >= 60000) {
+        lastMinute = now;
+        elapsed_minutes++;
+        
+        Serial.printf("Minutes elapsed: %d\n", elapsed_minutes);
+        
+        // After being awake for awake_time_in_minutes, go to sleep
+        if (elapsed_minutes >= awake_time_in_minutes) {
+            goToSleep();
+        }
     }
 }

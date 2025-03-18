@@ -19,17 +19,20 @@ The display shows messages in random colors, creating a constantly changing kale
 - 64x64 RGB LED Matrix Display (HUB75 interface)
 - ESP32 microcontroller
 - Power supply (5V)
-- Boot button (GPIO0) for time setup
+- Boot button (GPIO0) for manual sleep control
 
 ## Features
 
 - Displays messages in random colors for visual variety
-- Changes message every 30 seconds
+- Changes message every wake cycle
 - Completely offline operation
 - Built-in collection of whimsical utopian messages
 - Low memory footprint
 - Simple and reliable operation
-- Power-saving sleep mode (22:00-07:00)
+- Automatic day/night cycle:
+  - Active for 15 hours
+  - Sleep for 9 hours
+- Manual sleep mode via boot button
 
 ## Technical Details
 
@@ -42,8 +45,8 @@ The display shows messages in random colors, creating a constantly changing kale
 - Resolution: 64x64 pixels
 - Interface: HUB75
 - Driver: FM6124
-- Brightness: 100/255 (configurable)
-- Update Interval: 30 seconds
+- Brightness: 80/255 (configurable)
+- Wake/Sleep Cycle: 15 hours awake / 9 hours sleep
 
 ## Setup Instructions
 
@@ -51,10 +54,12 @@ The display shows messages in random colors, creating a constantly changing kale
    - ESP32-HUB75-MatrixPanel-I2S-DMA
 2. Connect the ESP32 to your LED matrix following HUB75 pinout
 3. Upload the code to your ESP32
-4. On first boot, use the boot button to set the time:
-   - Short press: Increment hour (0-23)
-   - Long press (2 seconds): Confirm time
-5. The device will now run automatically, sleeping between 22:00 and 07:00
+4. The device will automatically:
+   - Display a random message
+   - Stay awake for 15 hours
+   - Sleep for 9 hours
+   - Repeat cycle with new message
+5. Press the boot button (GPIO0) at any time to enter sleep mode manually
 
 ## Customization
 
