@@ -308,13 +308,11 @@ const char* const utopias[] = {
 constexpr uint8_t DISPLAY_WIDTH = 64;
 constexpr uint8_t DISPLAY_HEIGHT = 64;
 constexpr uint8_t BRIGHTNESS = 80;  // 0-255
-constexpr unsigned long REFRESH_INTERVAL = 1000UL * 60 * 60 * 4;  //60 minutes * 4 = 4 hours
-const uint8_t SLEEP_BUTTON = 0;  // GPIO0 - BOOT button
-const unsigned long DEBOUNCE_DELAY = 50;  // milliseconds
+constexpr uint8_t SLEEP_BUTTON = 0;  // GPIO0 - BOOT button
 
-// Time configuration
-const uint16_t sleep_time_in_minutes = 9 * 60;    // Sleep for 9 hours (in minutes)
-const uint16_t awake_time_in_minutes = 15 * 60;   // Stay awake for 15 hours (in minutes)
+// Time configuration (in microseconds)
+const uint64_t AWAKE_TIME_US = 15ULL * 3600ULL * 1000000ULL;  // 15 hours
+const uint64_t SLEEP_TIME_US = 9ULL * 3600ULL * 1000000ULL;   // 9 hours
 
 // RTC variable that persists during deep sleep
 RTC_DATA_ATTR uint16_t elapsed_minutes = 0;  // Minutes since last wake
@@ -343,7 +341,6 @@ public:
 class DisplayManager {
 private:
     MatrixPanel_I2S_DMA* display;
-    // lastUpdateTime removed as it's no longer needed
 
 public:
     DisplayManager() {
@@ -375,7 +372,6 @@ public:
         display->setTextColor(display->color444(r, g, b));
     }
 
-    // shouldUpdate() and markUpdated() removed as they're no longer needed
 
     void updateDisplay(const String& message) {
         clearScreen();
@@ -456,68 +452,50 @@ public:
 
 // Function implementations
 void goToSleep() {
-    Serial.printf("Sleep time reached (Elapsed minutes: %d). Going to sleep for %d minutes\n", 
-                 elapsed_minutes, sleep_time_in_minutes);
-    
+    Serial.println("Going to sleep now");
     display->clearScreen();
     display->setBrightness8(0);
     
-    // Reset elapsed_minutes counter
-    elapsed_minutes = 0;
+    esp_sleep_enable_timer_wakeup(SLEEP_TIME_US);
+    Serial.printf("Sleep time set to %llu seconds\n", SLEEP_TIME_US / 1000000ULL);
     
-    // Calculate sleep duration in microseconds
-    const uint64_t SECONDS_PER_MINUTE = 60ULL;
-    uint64_t sleepMicros = sleep_time_in_minutes * SECONDS_PER_MINUTE * 1000000ULL;
-    
-    // Enable wake-up sources
-    esp_sleep_enable_timer_wakeup(sleepMicros);
-    
-    Serial.println("Going to sleep now");
     Serial.flush();
     delay(100);
-    
     esp_deep_sleep_start();
 }
 
 void setup() {
     Serial.begin(115200);
     Serial.println("\nFramed Utopia Starting Up");
-    Serial.printf("Will stay awake for %d minutes\n", awake_time_in_minutes);
+    Serial.printf("Will stay awake for %llu hours\n", AWAKE_TIME_US / 3600000000ULL);
     
     // Setup sleep button as input with internal pull-up
     pinMode(SLEEP_BUTTON, INPUT_PULLUP);
-        
+    
     display = new DisplayManager();
     content = new ContentManager();
-        
+    
     // Display new message on wake
     display->updateDisplay(content->getRandomMessage());
 }
 
 void loop() {
-    static unsigned long lastMinute = 0;
+    static unsigned long start_time = millis();
     static unsigned long lastButtonCheck = 0;
     unsigned long now = millis();
     
     // Check button state with debounce
-    if ((now - lastButtonCheck) >= DEBOUNCE_DELAY) {
+    if ((now - lastButtonCheck) >= 50) {
         lastButtonCheck = now;
         if (digitalRead(SLEEP_BUTTON) == LOW) {  // Button is pressed (active low)
             Serial.println("Sleep button pressed, going to sleep");
-            goToSleep();  // Go to sleep immediately
+            goToSleep();
         }
     }
     
-    // Regular time checking
-    if ((now - lastMinute) >= 60000) {
-        lastMinute = now;
-        elapsed_minutes++;
-        
-        Serial.printf("Minutes elapsed: %d\n", elapsed_minutes);
-        
-        // After being awake for awake_time_in_minutes, go to sleep
-        if (elapsed_minutes >= awake_time_in_minutes) {
-            goToSleep();
-        }
+    // Check if awake time has elapsed
+    if ((now - start_time) >= (AWAKE_TIME_US / 1000ULL)) {  // Convert microseconds to milliseconds
+        Serial.println("Awake time reached, going to sleep");
+        goToSleep();
     }
 }
